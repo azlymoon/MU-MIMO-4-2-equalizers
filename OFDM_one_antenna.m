@@ -1,5 +1,5 @@
 clear all
-fe=20000;       %the number of collected statistics at each noise var value
+fe=10000;       %the number of collected statistics at each noise var value
 
 %Modulation parameters
 M = 4;      % Modulation order
@@ -16,7 +16,7 @@ Es=Es/M;
 %OFDM parameters
 nOFDM=14;                % Number of OFDM symbols   
 nFFT = 2048;             % Number of FFT bins
-rb = 10;                % Number of RB (resource blocks)
+rb = 100;                % Number of RB (resource blocks)
 n = rb*12;               % Number of QAM symbols in OFDM symbol
 padding_len=(nFFT-n)/2;  % length of padding zeros elements before ifft (half of them)
 CP_len=0.125*nFFT;       % length of cyclic prefix (guard band)
@@ -40,7 +40,7 @@ model.InitTime= 0;
 ue.NCellID = 3;
 ue.NSubframe = 0;
 
-chs.PRBSet = (0:4).';
+chs.PRBSet = (0:49).';
 %%chs.PRBSet = (0:49).';
 
 dmrs_1 = ltePUSCHDRS(ue,chs);
@@ -51,7 +51,7 @@ dmrs_2 = ltePUSCHDRS(ue,chs);
 sym_1=4; sym_2=11;
 
 %Parameters for simulations
-EbNoArray=0:2:12;
+EbNoArray=-6:2:12;
 Bit_Err_zf=zeros(1,length(EbNoArray));
 Bit_Err_mmse=zeros(1,length(EbNoArray));
 BER_theor=zeros(1,length(EbNoArray));
@@ -64,17 +64,28 @@ evm_mmse_avg=zeros(1,length(EbNoArray));
 %Converting EsNO from EbNo
 EsNoArray=EbNoArray+10*log10(k);%+10*log10(n/nFFT);
 
-
-% IRC: Разложение Холецкого ковариационной матрицы
-K_ni = [1 0.9 0.9 0.81; 0.9 1 0.81 0.9; 0.9 0.81 1 0.9; 0.81 0.9 0.9 1];
-L_matrix = chol(K_ni, 'lower');
-
-
 count=0;
 for i=1:length(EbNoArray)
     while count<fe
-        EsNo=EsNoArray(i);
+        EsNo=EsNoArray(i);   
         noise_var = 1/(exp(log(10) * EsNo/10)); %QAM with unit average power
+
+        % IRC: Разложение Холецкого ковариационной матрицы
+        %K_ni = [1 0.9 0.9 0.81; 0.9 1 0.81 0.9; 0.9 0.81 1 0.9; 0.81 0.9 0.9 1];
+        % 
+        alpha = 0.9;
+        beta = 0.9;
+        K_ni = [
+            1 beta alpha beta*alpha; 
+            beta 1 alpha*beta alpha; 
+            alpha alpha*beta 1 beta; 
+            alpha*beta alpha beta 1;
+        ];
+
+        %K_ni = [1 0.9; 0.9 1];
+        K_ni = noise_var * K_ni;
+        L_matrix = chol(K_ni, 'up');
+        B_matrix = sqrtm(K_ni);
 
         %%%%%Transmitter%%%%%%
 
@@ -134,7 +145,21 @@ for i=1:length(EbNoArray)
             noise((nFFT + CP_len) * (sym_2 - 1) + 1 + delay:(nFFT + CP_len) * sym_2 + delay, l) = complex(zeros(1, nFFT + CP_len));
         end
         % Добавляем L_matrix в AWGN
-        rx = rx_fading_lte + sqrt(noise_var) * noise * L_matrix;
+        rx = rx_fading_lte + noise*L_matrix; %(L_matrix * (noise.')).';
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        % corr_noise =  noise*L_matrix;
+        % 
+        % %Вычисление дисперсии
+        % dispersions = var(corr_noise, 0, 1);
+        % disp('Дисперсиz шума по антеннам:');
+        % disp(noise_var*dispersions);
+        % 
+        % % Вычисление корреляции
+        % correlationMatrix = corrcoef(corr_noise);
+        % disp('Матрица корреляции:');
+        % disp(noise_var*correlationMatrix);
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
         %%%%%Receiver%%%%%%
         %Seral to parallel
@@ -188,25 +213,30 @@ for i=1:length(EbNoArray)
         % MMSE equalizer with IRC
         % ------------
         % IRC: Применение фильтра предварительного подавления шум
+
+        
+
         h_channel_filtered = zeros(size(h_channel));
         rx_fft_filtered = zeros(size(rx_fft));
         W = zeros([n, L, 2]);
 
-        for dmrs_symbol = 1:2
-            for ii = 1:n
-                h_channel_filtered(:, ii, dmrs_symbol) = L_matrix \ h_channel(:, ii, dmrs_symbol);
+        for ii = 1:n
+            for jj = 1:nOFDM
+                %rx_fft_filtered(ii, jj, :) = squeeze(rx_fft(ii, jj, :)).'/L_matrix;
+                rx_fft_filtered(ii, jj, :) = B_matrix \ squeeze(rx_fft(ii, jj, :));
             end
         end
 
-        for ii = 1:n
-            for jj = 1:nOFDM
-                rx_fft_filtered(ii, jj, :) = L_matrix \ squeeze(rx_fft(ii, jj, :));
+        for dmrs_symbol = 1:2
+            for ii = 1:n
+                %h_channel_filtered(:, ii, dmrs_symbol) = h_channel(:, ii, dmrs_symbol).'/L_matrix;
+                h_channel_filtered(:, ii, dmrs_symbol) = B_matrix \ h_channel(:, ii, dmrs_symbol);
             end
         end
 
         for jj = 1:2
             for ii = 1:n
-                W(ii, :, jj) = ((h_channel_filtered(:, ii, jj)' * h_channel_filtered(:, ii, jj) + noise_var))\h_channel_filtered(:, ii, jj)';
+                W(ii, :, jj) = ((h_channel_filtered(:, ii, jj)' * h_channel_filtered(:, ii, jj) + 1))\h_channel_filtered(:, ii, jj)';
             end
         end
 
@@ -269,7 +299,7 @@ for i=1:length(EbNoArray)
             for ii=0:n-1
                 bit_err_cur_zf = nnz(data(ii*k+1:ii*k+k,jj)-dw_zf(ii*k+1:ii*k+k,jj));
                 bit_err_cur_mmse = nnz(data(ii*k+1:ii*k+k,jj)-dw_mmse(ii*k+1:ii*k+k,jj));
-                if bit_err_cur_mmse>0
+                if bit_err_cur_zf>0
                     count=count+1;
                     Sim_Err(i)=Sim_Err(i)+1;
                 end
@@ -280,10 +310,10 @@ for i=1:length(EbNoArray)
         Bit_Err_zf(i)=Bit_Err_zf(i)+bit_err_zf;
         Bit_Err_mmse(i)=Bit_Err_mmse(i)+bit_err_mmse;
         Itr(i)=Itr(i)+1;
-        disp("-------------");
-        disp(Bit_Err_mmse./Itr./(n*k*(nOFDM-2)));
-        disp(Bit_Err_zf./Itr./(n*k*(nOFDM-2)));
     end
+    disp("-------------");
+    disp(Bit_Err_mmse./Itr./(n*k*(nOFDM-2)));
+    disp(Bit_Err_zf./Itr./(n*k*(nOFDM-2)));
     count=0;
     [BER_theor(i), SER_theor(i)]=berfading(EbNoArray(i),'qam',M,L);
 end
