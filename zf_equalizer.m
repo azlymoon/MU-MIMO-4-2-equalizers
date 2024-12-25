@@ -5,6 +5,8 @@ function rx_fft_zf = zf_equalizer(h_channel, rx_fft, n, S, L, nOFDM, sym_1, sym_
         W(ii, :, :) = pinv(squeeze(h_channel(:, ii, :)));
     end
 
+    % W(n/2+1:end, :, :) = W(1:n/2, :, :);
+
     rx_fft_eq=zeros(n,nOFDM,S);
     
     for jj = 1:14

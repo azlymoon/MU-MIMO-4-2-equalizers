@@ -1,4 +1,4 @@
-function [tx_ifft_seq, tx_qam] = OFDM_modulation(data, n, M, nOFDM, sym_1, sym_2, dmrs_1, dmrs_2, nFFT, padding_len, CP_len, delay, S)
+function [tx_ifft_seq, tx_qam] = OFDM_modulation(data, n, M, nOFDM, sym_1, sym_2, dmrs_1, dmrs_2, nFFT, padding_len, CP_len, delay, S, current_s)
     k = log2(M);
     
     % Модуляция
@@ -15,13 +15,36 @@ function [tx_ifft_seq, tx_qam] = OFDM_modulation(data, n, M, nOFDM, sym_1, sym_2
     % Заполнение tx_qam_dmrs данными
     tx_qam_dmrs(:, [1:sym_1-1, sym_1+1:sym_2-1, sym_2+1:end]) = tx_qam;
 
-    % Условие для разных потоков
-    if S == 1  % Если это первый поток
-        tx_qam_dmrs(:, sym_1) = dmrs_1;  % Используем dmrs_1
-        tx_qam_dmrs(:, sym_2) = 0;       % Нулевой для второго символа
-    elseif S == 2  % Если это второй поток
-        tx_qam_dmrs(:, sym_1) = 0;       % Нулевой для первого символа
-        tx_qam_dmrs(:, sym_2) = dmrs_2;  % Используем dmrs_2
+    if S == 1
+        tx_qam_dmrs(:, sym_1) = dmrs_1;
+        tx_qam_dmrs(:, sym_2) = dmrs_2;
+
+    elseif S == 2
+        if current_s == 1
+            tx_qam_dmrs(:, sym_1) = dmrs_1;
+            tx_qam_dmrs(:, sym_2) = 0;
+        elseif current_s == 2
+            tx_qam_dmrs(:, sym_1) = 0;
+            tx_qam_dmrs(:, sym_2) = dmrs_2;
+        end
+
+    elseif S == 4
+        even_indices = (2:2:n)';
+        odd_indices = (1:2:n)';
+        column_sym_1 = zeros(size(tx_qam_dmrs(:, sym_1)));
+        column_sym_2 = zeros(size(tx_qam_dmrs(:, sym_2)));
+        if current_s == 1
+            column_sym_1(even_indices) = dmrs_1(even_indices);
+        elseif current_s == 2
+            column_sym_1(odd_indices) = dmrs_1(odd_indices);
+        elseif current_s == 3
+           column_sym_2(even_indices) = dmrs_2(even_indices);
+        elseif current_s == 4
+            column_sym_2(odd_indices) = dmrs_2(odd_indices);
+        end
+
+        tx_qam_dmrs(:, sym_1) = column_sym_1;
+        tx_qam_dmrs(:, sym_2) = column_sym_2;
     end
 
     % iFFT шаг с нулевым заполнением

@@ -1,5 +1,5 @@
 clear all
-fe=25000;       %the number of collected statistics at each noise var value
+fe=10000;       %the number of collected statistics at each noise var value
 
 %Modulation parameters
 M = 16;      % Modulation order
@@ -25,10 +25,10 @@ CP_len=0.125*nFFT;       % length of cyclic prefix (guard band)
 fs = 30.72e6;            % Sample rate in Hz from LTE
 
 %Number of antennas
-L = 4;
+L = 8;
 
 %Number of streams
-S = 2;
+S = 4;
 
 delay=7;
 
@@ -55,7 +55,7 @@ dmrs_2 = ltePUSCHDRS(ue,chs);
 sym_1=4; sym_2=11;
 
 %Parameters for simulations
-EbNoArray=0:1:12;
+EbNoArray=0:2:10;
 Bit_Err_zf=zeros(1,length(EbNoArray));
 Bit_Err_mmse=zeros(1,length(EbNoArray));
 BER_theor=zeros(1,length(EbNoArray));
@@ -104,11 +104,11 @@ for i=1:length(EbNoArray)
 
 
         %EVM
-        evm_zf = calc_evm_zf(S, nOFDM, n, tx_qam, rx_fft_zf);
-        evm_mmse = calc_evm_mmse(S, nOFDM, n, tx_qam, rx_fft_mmse);
-
-        evm_zf_avg(i)=evm_zf_avg(i)+mean(10*log10(evm_zf),'all');
-        evm_mmse_avg(i)=evm_mmse_avg(i)+mean(10*log10(evm_mmse),'all');
+        % evm_zf = calc_evm_zf(S, nOFDM, n, tx_qam, rx_fft_zf);
+        % evm_mmse = calc_evm_mmse(S, nOFDM, n, tx_qam, rx_fft_mmse);
+        % 
+        % evm_zf_avg(i)=evm_zf_avg(i)+mean(10*log10(evm_zf),'all');
+        % evm_mmse_avg(i)=evm_mmse_avg(i)+mean(10*log10(evm_mmse),'all');
 
 
         %Demodulation
@@ -117,9 +117,13 @@ for i=1:length(EbNoArray)
         %Count SER and BER
         bit_err_zf=0;
         bit_err_mmse=0;
+        tmp_n = n;
+        if S == 4
+            tmp_n = n / 2;
+        end
         for ss=1:S
             for jj=1:nOFDM-2
-                for ii=0:n-1
+                for ii=0:tmp_n-1
                     bit_err_cur_zf=nnz(data(ii*k+1:ii*k+k,jj,ss)-dw_zf(ii*k+1:ii*k+k,jj,ss));
                     bit_err_cur_mmse=nnz(data(ii*k+1:ii*k+k,jj,ss)-dw_mmse(ii*k+1:ii*k+k,jj,ss));
                     if bit_err_cur_zf>0
@@ -139,10 +143,14 @@ for i=1:length(EbNoArray)
     %BER_theor(i)=(1/k)*2*(sqrt(M)-1)/sqrt(M)*erfc(sqrt(k*0.1*(10.^(EbNoArray(i)/10))));
     %SER_theor(i)=2*(sqrt(M)-1)/sqrt(M)*erfc(sqrt(0.1*(10.^(EsNoArray(i)/10))));
     [BER_theor(i), SER_theor(i)]=berfading(EbNoArray(i),'qam',M,S,L);
+
+    disp("-------------");
+    disp(Bit_Err_mmse./Itr./(n*k*(nOFDM-2)));
+    disp(Bit_Err_zf./Itr./(n*k*(nOFDM-2)));
 end
 
 BER_zf=Bit_Err_zf./Itr./(S*n*k*(nOFDM-2));
 BER_mmse=Bit_Err_mmse./Itr./(S*n*k*(nOFDM-2));
 SER=Sim_Err./Itr./(S*n*(nOFDM-2));
-EVM_zf=evm_zf_avg./Itr;
-EVM_mmse=evm_mmse_avg./Itr;
+% EVM_zf=evm_zf_avg./Itr;
+% EVM_mmse=evm_mmse_avg./Itr;

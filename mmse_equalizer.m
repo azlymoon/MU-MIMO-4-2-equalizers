@@ -4,6 +4,8 @@ function rx_fft_mmse = mmse_equalizer(h_channel, rx_fft, n, S, L, nOFDM, sym_1, 
     for ii = 1:n
        W(ii, :, :) = ((squeeze(h_channel(:, ii, :))' * squeeze(h_channel(:, ii, :)) + noise_var))\squeeze(h_channel(:, ii, :))';
     end
+
+    % W(n/2+1:end, :, :) = W(1:n/2, :, :);
     
     rx_fft_eq_1=zeros(n,nOFDM,S);
      
