@@ -7,14 +7,14 @@ function rx_fft_mmse = mmse_equalizer(h_channel, rx_fft, n, S, L, nOFDM, sym_1, 
 
     % W(n/2+1:end, :, :) = W(1:n/2, :, :);
     
-    rx_fft_eq_1=zeros(n,nOFDM,S);
+    rx_fft_eq_1 = zeros(n,nOFDM,S);
      
-    for jj=1:14
-        for ii=1:n
-            rx_fft_eq_1(ii,jj,:)=squeeze(W(ii,:,:))*squeeze(rx_fft(ii,jj,:));
+    for jj = 1:14
+        for ii = 1:n
+            rx_fft_eq_1(ii,jj,:) = squeeze(W(ii, :, :)) * squeeze(rx_fft(ii, jj, :));
         end
     end
 
-    rx_fft_mmse=rx_fft_eq_1(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end],:);
+    rx_fft_mmse = rx_fft_eq_1(:, [1:sym_1-1, sym_1+1:sym_2-1, sym_2+1:end], :);
 end
 

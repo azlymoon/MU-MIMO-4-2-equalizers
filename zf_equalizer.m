@@ -7,14 +7,14 @@ function rx_fft_zf = zf_equalizer(h_channel, rx_fft, n, S, L, nOFDM, sym_1, sym_
 
     % W(n/2+1:end, :, :) = W(1:n/2, :, :);
 
-    rx_fft_eq=zeros(n,nOFDM,S);
+    rx_fft_eq = zeros(n,nOFDM,S);
     
     for jj = 1:14
-        for ii=1:n
-            rx_fft_eq(ii,jj,:)=squeeze(W(ii,:,:))*squeeze(rx_fft(ii,jj,:));
+        for ii = 1:n
+            rx_fft_eq(ii,jj,:) = squeeze(W(ii,:,:)) * squeeze(rx_fft(ii,jj,:));
         end
     end
 
-    rx_fft_zf=rx_fft_eq(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end],:);
+    rx_fft_zf = rx_fft_eq(:, [1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end], :);
 end
 
