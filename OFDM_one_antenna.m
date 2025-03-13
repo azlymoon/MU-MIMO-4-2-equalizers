@@ -1,5 +1,7 @@
+% Сохраните этот код в файл с расширением .m, например, main.m
+
 clear all
-fe=10000;       %the number of collected statistics at each noise var value
+fe=12000;       %the number of collected statistics at each noise var value
 
 %Modulation parameters
 M = 4;      % Modulation order
@@ -14,7 +16,7 @@ end
 Es=Es/M;
 
 %OFDM parameters
-nOFDM=14;                % Number of OFDM symbols   
+nOFDM=14;                % Number of OFDM symbols
 nFFT = 2048;             % Number of FFT bins
 rb = 100;                % Number of RB (resource blocks)
 n = rb*12;               % Number of QAM symbols in OFDM symbol
@@ -25,7 +27,7 @@ CP_len=0.125*nFFT;       % length of cyclic prefix (guard band)
 fs = 30.72e6;            % Sample rate in Hz from LTE
 
 %Number of antennas
-L = 4;
+L = 1;
 
 %LTE model
 model = struct(DelayProfile="EVA",NRxAnts=1, ...
@@ -40,8 +42,8 @@ model.InitTime= 0;
 ue.NCellID = 3;
 ue.NSubframe = 0;
 
+%chs.PRBSet = (0:4).';
 chs.PRBSet = (0:49).';
-%%chs.PRBSet = (0:49).';
 
 dmrs_1 = ltePUSCHDRS(ue,chs);
 
@@ -51,7 +53,7 @@ dmrs_2 = ltePUSCHDRS(ue,chs);
 sym_1=4; sym_2=11;
 
 %Parameters for simulations
-EbNoArray=-6:2:12;
+EbNoArray=0:2:12;
 Bit_Err_zf=zeros(1,length(EbNoArray));
 Bit_Err_mmse=zeros(1,length(EbNoArray));
 BER_theor=zeros(1,length(EbNoArray));
@@ -61,31 +63,20 @@ Itr=zeros(1,length(EbNoArray));
 evm_zf_avg=zeros(1,length(EbNoArray));
 evm_mmse_avg=zeros(1,length(EbNoArray));
 
+% Параметры временного фильтра (DFE) - как указано в вашем коде
+L_kih = 40;
+
+% Параметры блока C|P (Comparator/Processor).  Простое пороговое устройство.
+threshold = 0;
+
 %Converting EsNO from EbNo
 EsNoArray=EbNoArray+10*log10(k);%+10*log10(n/nFFT);
 
 count=0;
 for i=1:length(EbNoArray)
     while count<fe
-        EsNo=EsNoArray(i);   
+        EsNo=EsNoArray(i);
         noise_var = 1/(exp(log(10) * EsNo/10)); %QAM with unit average power
-
-        % IRC: Разложение Холецкого ковариационной матрицы
-        %K_ni = [1 0.9 0.9 0.81; 0.9 1 0.81 0.9; 0.9 0.81 1 0.9; 0.81 0.9 0.9 1];
-        % 
-        alpha = 0.9;
-        beta = 0.9;
-        K_ni = [
-            1 beta alpha beta*alpha; 
-            beta 1 alpha*beta alpha; 
-            alpha alpha*beta 1 beta; 
-            alpha*beta alpha beta 1;
-        ];
-
-        %K_ni = [1 0.9; 0.9 1];
-        K_ni = noise_var * K_ni;
-        L_matrix = chol(K_ni, 'up');
-        B_matrix = sqrtm(K_ni);
 
         %%%%%Transmitter%%%%%%
 
@@ -99,13 +90,20 @@ for i=1:length(EbNoArray)
                 tx_qam(ii+1,jj)=qammod(data(ii*k+1:ii*k+k,jj),M,'gray',InputType='bit',UnitAveragePower=true);
             end
         end
+        %FFT step, without DM-RS
+        norm_1 = 1/sqrt(n);
+        tx_qam_shift = fftshift(tx_qam,1);
+        tx_qam_fft = norm_1.*fft(tx_qam_shift,n,1);
 
         %Add dm-rs signal on positions sym_1 and sym_2
         tx_qam_dmrs=zeros(n,nOFDM);
 
-        tx_qam_dmrs(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end])=tx_qam;
+        tx_qam_dmrs(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end])=tx_qam_fft;
         tx_qam_dmrs(:,sym_1)=dmrs_1;
         tx_qam_dmrs(:,sym_2)=dmrs_2;
+
+        dmrs_fft_1 = norm_1.*fft(dmrs_1);
+        dmrs_fft_2 = norm_1.*fft(dmrs_2);
 
         %iFFt step with zero padding
         tx_padding=[complex(zeros(padding_len,nOFDM)); tx_qam_dmrs; complex(zeros(padding_len,nOFDM))];
@@ -130,38 +128,17 @@ for i=1:length(EbNoArray)
            [rx_fading_lte(:, l), info] = lteFadingChannel(model, reshape(tx_ifft_seq_L(l, :), [numel(tx_ifft_seq), 1]));
         end
 
-        %rx_fading_lte = tx_ifft_seq_L.';
-        %%%%%Shift offset%%%%%%%%
-        %imp_res=[zeros(1,delay), 1, zeros(1,200)];
-        %rx_fading_phase=conv(tx_ifft_seq,imp_res);
-        %rx_fading_phase=reshape(rx_fading_phase(1:length(tx_ifft_seq)),[1,length(tx_ifft_seq)]);
-
         %%%%%AWGN channel%%%%%%
-        noise = zeros(size(rx_fading_lte));
-        % rx = zeros(size(rx_fading_lte));
+        rx = zeros(size(rx_fading_lte));
         for l = 1:L
-            noise(:, l) = (randn(size(rx_fading_lte(:, l))) + 1i * randn(size(rx_fading_lte(:, l)))) / sqrt(2);
-            noise((nFFT + CP_len) * (sym_1 - 1) + 1 + delay:(nFFT + CP_len) * sym_1 + delay, l) = complex(zeros(1, nFFT + CP_len));
-            noise((nFFT + CP_len) * (sym_2 - 1) + 1 + delay:(nFFT + CP_len) * sym_2 + delay, l) = complex(zeros(1, nFFT + CP_len));
+            noise = (randn(size(rx_fading_lte(:, l))) + 1i * randn(size(rx_fading_lte(:, l)))) / sqrt(2);
+            noise((nFFT + CP_len) * (sym_1 - 1) + 1 + delay:(nFFT + CP_len) * sym_1 + delay) = complex(zeros(1, nFFT + CP_len));
+            noise((nFFT + CP_len) * (sym_2 - 1) + 1 + delay:(nFFT + CP_len) * sym_2 + delay) = complex(zeros(1, nFFT + CP_len));
+            rx(:, l) = rx_fading_lte(:, l) + sqrt(noise_var) * noise;
         end
-        % Добавляем L_matrix в AWGN
-        rx = rx_fading_lte + noise*L_matrix; %(L_matrix * (noise.')).';
-
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        % corr_noise =  noise*L_matrix;
-        % 
-        % %Вычисление дисперсии
-        % dispersions = var(corr_noise, 0, 1);
-        % disp('Дисперсиz шума по антеннам:');
-        % disp(noise_var*dispersions);
-        % 
-        % % Вычисление корреляции
-        % correlationMatrix = corrcoef(corr_noise);
-        % disp('Матрица корреляции:');
-        % disp(noise_var*correlationMatrix);
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
         %%%%%Receiver%%%%%%
+
         %Seral to parallel
         rx_cp = zeros([size(tx_ifft_cp), L]);
         for l = 1:L
@@ -180,7 +157,7 @@ for i=1:length(EbNoArray)
             rx_fft_padding(:, :, l)=fft(rx(:,:,l),nFFT,1)./norm;
             rx_fft_padding(:, :, l)=fftshift(rx_fft_padding(:, :, l),1);
         end
-        
+
         rx_fft = zeros([size(tx_qam_dmrs), L]);
         for l = 1:L
             rx_fft(:, :, l)=rx_fft_padding(padding_len+1:(end-padding_len),:, l);
@@ -195,111 +172,94 @@ for i=1:length(EbNoArray)
         end
 
         %ZF equalizer
-        W = zeros([n, L, 2]);
+        W_zf = zeros([n, L, 2]);
         for jj = 1:2
             for ii = 1:n
-                W(ii, :, jj) = pinv(h_channel(:, ii, jj));
+                W_zf(ii, :, jj) = pinv(h_channel(:, ii, jj));
             end
         end
 
-        rx_fft_eq=zeros(n,nOFDM);
+        rx_fft_eq_zf=zeros(n,nOFDM);
         for j=1:7
             for ii=1:n
-                rx_fft_eq(ii,j)=W(ii,:,1)*squeeze(rx_fft(ii,j,:));
-                rx_fft_eq(ii,j+7)=W(ii,:,2)*squeeze(rx_fft(ii,j+7,:));
-            end
-        end    
-
-        % MMSE equalizer with IRC
-        % ------------
-        % IRC: Применение фильтра предварительного подавления шум
-
-        
-
-        h_channel_filtered = zeros(size(h_channel));
-        rx_fft_filtered = zeros(size(rx_fft));
-        W = zeros([n, L, 2]);
-
-        for ii = 1:n
-            for jj = 1:nOFDM
-                %rx_fft_filtered(ii, jj, :) = squeeze(rx_fft(ii, jj, :)).'/L_matrix;
-                rx_fft_filtered(ii, jj, :) = B_matrix \ squeeze(rx_fft(ii, jj, :));
+                rx_fft_eq_zf(ii,j)=W_zf(ii,:,1)*squeeze(rx_fft(ii,j,:));
+                rx_fft_eq_zf(ii,j+7)=W_zf(ii,:,2)*squeeze(rx_fft(ii,j+7,:));
             end
         end
 
-        for dmrs_symbol = 1:2
-            for ii = 1:n
-                %h_channel_filtered(:, ii, dmrs_symbol) = h_channel(:, ii, dmrs_symbol).'/L_matrix;
-                h_channel_filtered(:, ii, dmrs_symbol) = B_matrix \ h_channel(:, ii, dmrs_symbol);
-            end
-        end
-
+        %MMSE equalizer
+        W_mmse = zeros([n, L, 2]);
         for jj = 1:2
             for ii = 1:n
-                W(ii, :, jj) = ((h_channel_filtered(:, ii, jj)' * h_channel_filtered(:, ii, jj) + 1))\h_channel_filtered(:, ii, jj)';
+                W_mmse(ii, :, jj) = ((h_channel(:, ii, jj)' * h_channel(:, ii, jj) + noise_var))\h_channel(:, ii, jj)';
             end
         end
 
-        rx_fft_eq_1=zeros(n,nOFDM);
+        rx_fft_eq_mmse=zeros(n,nOFDM);
 
+        %for j=1:7
+        %    for ii=1:n
+        %        rx_fft_eq_mmse(ii,j)=W_mmse(ii,:,1)*squeeze(rx_fft(ii,j,:));
+        %        rx_fft_eq_mmse(ii,j+7)=W_mmse(ii,:,2)*squeeze(rx_fft(ii,j+7,:));
+        %    end
+        %end
+
+        % Pre-allocate g_fb_matrix and G_FF_matrix with the correct size
+        g_fb_matrix = zeros(L_kih+1, 2, L); % L_kih rows, 2 columns (for each DM-RS), L layers
+        G_FF_matrix = zeros(n, 2, L);
+
+        rx_fft_eq_zf_shift=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
+        rx_fft_eq_zf = ifftshift(rx_fft_eq_zf_shift,1);
+        for l = 1:L  %Итерируемся по антеннам для расчета DFE коэффициентов
+            for jj = 1:2 %итерируемся по номерам DM-RS
+                [g_fb, G_FF]=Coeffients_DFE_calculation(squeeze(W_mmse(:,l,jj)),h_channel(l, :, jj), noise_var, L_kih, n);
+                g_fb = [0+1i*0; g_fb];
+                g_fb_matrix(:,jj,l) = g_fb; % сохраняем коэф. для каждой антенны
+                G_FF_matrix(:,jj,l) = G_FF;
+            end
+        end
         for j=1:7
             for ii=1:n
-                rx_fft_eq_1(ii,j)=W(ii,:,1)*squeeze(rx_fft_filtered(ii,j,:));
-                rx_fft_eq_1(ii,j+7)=W(ii,:,2)*squeeze(rx_fft_filtered(ii,j+7,:));
+                 rx_fft_eq_mmse(ii,j)=squeeze(G_FF_matrix(ii,1,:)).'*squeeze(rx_fft(ii,j,:));
+                 rx_fft_eq_mmse(ii,j+7)=squeeze(G_FF_matrix(ii,2,:)).'*squeeze(rx_fft(ii,j+7,:));
             end
         end
-        % ------------
 
-        % MMSE equalizer without IRC
-        % ------------
-        % W = zeros([n, L, 2]);
-        % for jj = 1:2
-        %     for ii = 1:n
-        %         W(ii, :, jj) = ((h_channel(:, ii, jj)' * h_channel(:, ii, jj) + noise_var))\h_channel(:, ii, jj)';
-        %     end
-        % end
-        % 
-        % rx_fft_eq_1=zeros(n,nOFDM);
-        % 
-        % for j=1:7
-        %     for ii=1:n
-        %         rx_fft_eq_1(ii,j)=W(ii,:,1)*squeeze(rx_fft(ii,j,:));
-        %         rx_fft_eq_1(ii,j+7)=W(ii,:,2)*squeeze(rx_fft(ii,j+7,:));
-        %     end
-        % end
-        % ------------
-
-        rx_fft_zf=rx_fft_eq(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]);
-        rx_fft_mmse=rx_fft_eq_1(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]);
+        rx_fft_tde_shift=ifft(rx_fft_eq_mmse(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
+        rx_fft_tde = ifftshift(rx_fft_tde_shift,1);
+        [~,rx_fft_dfe] = FIR_filter(rx_fft_tde,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2);
+        [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_dfe,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2);
 
         evm_zf=zeros(1,nOFDM-2);
         evm_mmse=zeros(1,nOFDM-2);
         for jj=1:nOFDM-2
-            evm_zf(jj)=calculate_evm(tx_qam(:,jj),rx_fft_zf(:,jj),n);
-            evm_mmse(jj)=calculate_evm(tx_qam(:,jj),rx_fft_mmse(:,jj),n);
+            evm_zf(jj)=calculate_evm(tx_qam(:,jj),rx_fft_tde(:,jj),n);
+            evm_mmse(jj)=calculate_evm(tx_qam(:,jj),rx_fft_tde(:,jj),n,h_channel(1,:,1));
         end
 
         evm_zf_avg(i)=evm_zf_avg(i)+mean(10*log10(evm_zf));
         evm_mmse_avg(i)=evm_mmse_avg(i)+mean(10*log10(evm_mmse));
 
         dw_zf=zeros(n*k,nOFDM-2);
+        dw_const=zeros(n,nOFDM-2);
         dw_mmse=zeros(n*k,nOFDM-2);
         for jj=1:nOFDM-2
             for ii=0:n-1
-                %Choose rx_fft_zf or rx_fft_mmse
-                dw_mmse(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_mmse(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
-                dw_zf(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_zf(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+                dw_mmse(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_dfe_demod(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+                dw_zf(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_eq_zf(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+                %qam_point = qamdemod(rx_fft_eq_zf(ii+1,jj),M,'gray',OutputType='approxllr',UnitAveragePower=true);
+                %dw_const(ii+1,jj) = qam_point(1)+1i*qam_point(2);
             end
         end
 
         %Count SER and BER
         bit_err_zf=0;
         bit_err_mmse=0;
-        for jj=1:nOFDM-2 
+        for jj=1:nOFDM-2
             for ii=0:n-1
                 bit_err_cur_zf = nnz(data(ii*k+1:ii*k+k,jj)-dw_zf(ii*k+1:ii*k+k,jj));
                 bit_err_cur_mmse = nnz(data(ii*k+1:ii*k+k,jj)-dw_mmse(ii*k+1:ii*k+k,jj));
-                if bit_err_cur_zf>0
+                if bit_err_cur_mmse>0
                     count=count+1;
                     Sim_Err(i)=Sim_Err(i)+1;
                 end
@@ -324,10 +284,8 @@ SER=Sim_Err./Itr./(n*(nOFDM-2));
 EVM_zf=evm_zf_avg./Itr;
 EVM_mmse=evm_mmse_avg./Itr;
 
-
 % Функция для вычисления EVM
-function evm = calculate_evm(tx_qam, rx_fft_eq, n)
-    % Вычисление EVM для ZF Equalizer
+function evm = calculate_evm(tx_qam, rx_fft_eq, n, h_channel)
     evm = (1 / (n)) * sum((imag(tx_qam) - imag(rx_fft_eq)).^2 + (real(tx_qam) - real(rx_fft_eq)).^2, 'all');
 end
 
@@ -344,51 +302,62 @@ function [qam_seq_bin, qam_list] = get_sequence(M)
     qam_seq_bin=qam_complex;
 end
 
-function [tx,qam_seq_gray] = qam_modulation(M,data,qam_seq,Es)
-    symbols = bit2int(data,length(data));
-    [~, seq_gray]=comm.internal.qam.getGrayMapping(M, symbols);
-    qam_seq_gray=qam_seq(seq_gray+1);
-    tx=qam_seq_gray(symbols+1)/sqrt(Es);
-end
+function [g_fb, G_FF]=Coeffients_DFE_calculation(W,h_channel, noise_var, L_kih, n)
+    b_mmse = zeros(1,L_kih);
+    M=length(h_channel);
+    for j=1:L_kih
+        b_curr = 0;
+        for k=1:M
+            b_curr = b_curr + exp((2*pi*1i*j*k)/M)/(abs(h_channel(k))^2+noise_var);
+        end
+        b_mmse(j) = -b_curr;
+    end
 
-function [dw]=qam_demod(rx,qam_seq,Es)
-
-    y=sqrt(Es)*rx;
-
-    M=length(qam_seq); 
-
-    rIdx = 2*floor(real(y)/2)+1;
-    if abs(rIdx)>(sqrt(M)-1)
-        if real(y)>0
-            rIdx=sqrt(M)-1;
-        else
-            rIdx=-sqrt(M)+1;
+    A_mmse = zeros(L_kih,L_kih);
+    for j=1:L_kih
+        for l=1:L_kih
+            A_curr = 0;
+            for k=1:M
+                A_curr = A_curr + exp((2*pi*1i*(l-j)*k)/M)/(abs(h_channel(k))^2+noise_var);
+            end
+            A_mmse(j,l) = - A_curr;
         end
     end
 
-    iIdx = 2*floor(imag(y)/2)+1;
-
-    if abs(iIdx)>(sqrt(M)-1)
-        if real(y)>0
-            iIdx=sqrt(M)-1;
-        else
-            iIdx=-sqrt(M)+1;
-        end
-    end
-
-    dw=complex(rIdx,iIdx);
-    pos=find(qam_seq==dw);
-    dw=int2bit(pos-1,log2(M));
+    g_fb = linsolve(A_mmse,b_mmse.');
+    g_fb_padding = [zeros(n/2-L_kih/2,1); g_fb; zeros(n/2-L_kih/2,1)];
+    G_FB = (1/sqrt(n)).*fft(g_fb_padding);
+    G_FF = W.*(1+G_FB);
 end
 
-function [dw]=qam_demod_norm(rx,qam_seq)
-    M=length(qam_seq);
-    k=log2(M);
-    dist_list=zeros(M,1);
-    for jj=1:M
-        dist_list(jj)=norm(rx - qam_seq(jj))^2;
+function [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_tde,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2)
+    
+    rx_fft_dfe = zeros(size(rx_fft_tde));
+    rx_fft_dfe_demod = zeros(size(rx_fft_tde));
+    
+    for jj=1:nOFDM-2
+        for ii=1:n
+            if jj < 7
+                g_fb = g_fb_matrix(:,1,1);
+            else
+                g_fb = g_fb_matrix(:,2,1);
+            end
+    
+            symbol_window = zeros(1, L_kih+1);
+            for k_tde = 1:L_kih+1
+                if (ii-k_tde)<0
+                    break
+                end
+                symbol_window(k_tde) = rx_fft_dfe_demod(ii-k_tde+1,jj);
+            end
+            
+            % Свертка с g_fb (применение DFE)
+            feedback_signal = sum(g_fb.' .* symbol_window);
+    
+            %Вычитание обратной связи
+            rx_fft_dfe(ii,jj) = rx_fft_tde(ii,jj) - feedback_signal;
+            qam_point = qamdemod(rx_fft_dfe(ii,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+            rx_fft_dfe_demod(ii,jj)=qammod(qam_point,M,'gray',InputType='bit',UnitAveragePower=true);
+        end
     end
-    pos = find(dist_list == min(dist_list)); 
-    dw_sim=pos-1;
-    dw=int2bit(dw_sim,k);
 end
