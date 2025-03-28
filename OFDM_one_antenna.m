@@ -1,5 +1,3 @@
-% Сохраните этот код в файл с расширением .m, например, main.m
-
 clear all
 fe=12000;       %the number of collected statistics at each noise var value
 
@@ -53,7 +51,7 @@ dmrs_2 = ltePUSCHDRS(ue,chs);
 sym_1=4; sym_2=11;
 
 %Parameters for simulations
-EbNoArray=0:2:12;
+EbNoArray=16:2:22;
 Bit_Err_zf=zeros(1,length(EbNoArray));
 Bit_Err_mmse=zeros(1,length(EbNoArray));
 BER_theor=zeros(1,length(EbNoArray));
@@ -63,11 +61,9 @@ Itr=zeros(1,length(EbNoArray));
 evm_zf_avg=zeros(1,length(EbNoArray));
 evm_mmse_avg=zeros(1,length(EbNoArray));
 
-% Параметры временного фильтра (DFE) - как указано в вашем коде
+% Параметры временного фильтра (DFE)
 L_kih = 40;
 
-% Параметры блока C|P (Comparator/Processor).  Простое пороговое устройство.
-threshold = 0;
 
 %Converting EsNO from EbNo
 EsNoArray=EbNoArray+10*log10(k);%+10*log10(n/nFFT);
@@ -92,8 +88,7 @@ for i=1:length(EbNoArray)
         end
         %FFT step, without DM-RS
         norm_1 = 1/sqrt(n);
-        tx_qam_shift = fftshift(tx_qam,1);
-        tx_qam_fft = norm_1.*fft(tx_qam_shift,n,1);
+        tx_qam_fft = fft(tx_qam,n,1);
 
         %Add dm-rs signal on positions sym_1 and sym_2
         tx_qam_dmrs=zeros(n,nOFDM);
@@ -102,8 +97,8 @@ for i=1:length(EbNoArray)
         tx_qam_dmrs(:,sym_1)=dmrs_1;
         tx_qam_dmrs(:,sym_2)=dmrs_2;
 
-        dmrs_fft_1 = norm_1.*fft(dmrs_1);
-        dmrs_fft_2 = norm_1.*fft(dmrs_2);
+        % dmrs_fft_1 = norm_1.*fft(dmrs_1);
+        % dmrs_fft_2 = norm_1.*fft(dmrs_2);
 
         %iFFt step with zero padding
         tx_padding=[complex(zeros(padding_len,nOFDM)); tx_qam_dmrs; complex(zeros(padding_len,nOFDM))];
@@ -197,26 +192,20 @@ for i=1:length(EbNoArray)
 
         rx_fft_eq_mmse=zeros(n,nOFDM);
 
-        %for j=1:7
+        % for j=1:7
         %    for ii=1:n
         %        rx_fft_eq_mmse(ii,j)=W_mmse(ii,:,1)*squeeze(rx_fft(ii,j,:));
         %        rx_fft_eq_mmse(ii,j+7)=W_mmse(ii,:,2)*squeeze(rx_fft(ii,j+7,:));
         %    end
-        %end
+        % end
+        %rx_fft_eq_zf_shift=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
+        %rx_fft_eq_zf = ifftshift(rx_fft_eq_zf_shift,1);
 
-        % Pre-allocate g_fb_matrix and G_FF_matrix with the correct size
-        g_fb_matrix = zeros(L_kih+1, 2, L); % L_kih rows, 2 columns (for each DM-RS), L layers
+        %Pre-allocate g_fb_matrix and G_FF_matrix with the correct size
+        g_fb_matrix = zeros(L_kih, 2);
         G_FF_matrix = zeros(n, 2, L);
-
-        rx_fft_eq_zf_shift=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
-        rx_fft_eq_zf = ifftshift(rx_fft_eq_zf_shift,1);
-        for l = 1:L  %Итерируемся по антеннам для расчета DFE коэффициентов
-            for jj = 1:2 %итерируемся по номерам DM-RS
-                [g_fb, G_FF]=Coeffients_DFE_calculation(squeeze(W_mmse(:,l,jj)),h_channel(l, :, jj), noise_var, L_kih, n);
-                g_fb = [0+1i*0; g_fb];
-                g_fb_matrix(:,jj,l) = g_fb; % сохраняем коэф. для каждой антенны
-                G_FF_matrix(:,jj,l) = G_FF;
-            end
+        for jj = 1:2 %итерируемся по номерам DM-RS
+            [g_fb_matrix(:,jj), G_FF_matrix(:,jj,:)]=Coeffients_DFE_calculation(squeeze(W_mmse(:,:,jj)),squeeze(h_channel(:, :, jj)), noise_var, L_kih-1, n);
         end
         for j=1:7
             for ii=1:n
@@ -225,16 +214,16 @@ for i=1:length(EbNoArray)
             end
         end
 
-        rx_fft_tde_shift=ifft(rx_fft_eq_mmse(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
-        rx_fft_tde = ifftshift(rx_fft_tde_shift,1);
-        [~,rx_fft_dfe] = FIR_filter(rx_fft_tde,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2);
-        [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_dfe,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2);
+        rx_fft_tde=ifft(rx_fft_eq_mmse(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1);
+        rx_fft_zf=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1);
+        [~,rx_fft_dfe] = FIR_filter(rx_fft_tde,n,nOFDM,g_fb_matrix,L_kih,M);
+        % [~,rx_fft_dfe] = FIR_filter(rx_fft_dfe,n,nOFDM,g_fb_matrix,L_kih,M);
 
         evm_zf=zeros(1,nOFDM-2);
         evm_mmse=zeros(1,nOFDM-2);
         for jj=1:nOFDM-2
-            evm_zf(jj)=calculate_evm(tx_qam(:,jj),rx_fft_tde(:,jj),n);
-            evm_mmse(jj)=calculate_evm(tx_qam(:,jj),rx_fft_tde(:,jj),n,h_channel(1,:,1));
+            evm_zf(jj)=calculate_evm(tx_qam(:,jj),rx_fft_zf(:,jj),n);
+            evm_mmse(jj)=calculate_evm(tx_qam(:,jj),rx_fft_dfe(:,jj),n,h_channel(1,:,1));
         end
 
         evm_zf_avg(i)=evm_zf_avg(i)+mean(10*log10(evm_zf));
@@ -245,8 +234,8 @@ for i=1:length(EbNoArray)
         dw_mmse=zeros(n*k,nOFDM-2);
         for jj=1:nOFDM-2
             for ii=0:n-1
-                dw_mmse(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_dfe_demod(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
-                dw_zf(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_eq_zf(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+                dw_mmse(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_dfe(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+                dw_zf(ii*k+1:ii*k+k,jj)=qamdemod(rx_fft_zf(ii+1,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
                 %qam_point = qamdemod(rx_fft_eq_zf(ii+1,jj),M,'gray',OutputType='approxllr',UnitAveragePower=true);
                 %dw_const(ii+1,jj) = qam_point(1)+1i*qam_point(2);
             end
@@ -296,41 +285,61 @@ function [qam_seq_bin, qam_list] = get_sequence(M)
 
     qam_complex=zeros(M,1);
     for ii=1:length(qam_list)
-        qam_complex(ii)=qam_list(ii,1)+i*qam_list(ii,2);
+        qam_complex(ii)=qam_list(ii,1)+1i*qam_list(ii,2);
     end
 
     qam_seq_bin=qam_complex;
 end
 
-function [g_fb, G_FF]=Coeffients_DFE_calculation(W,h_channel, noise_var, L_kih, n)
+function out = fourier_dfe(x,M)
+n = length(x);
+out = zeros(1,M);
+for i=1:M
+    for j=1:n
+        out(i)=out(i)+x(j)*exp(-1i*((2*pi)/M)*j*(i-1));
+    end
+end
+end
+
+function [g_fb, G_FF]=Coeffients_DFE_calculation(W, h_channel, noise_var, L_kih, n)
     b_mmse = zeros(1,L_kih);
     M=length(h_channel);
     for j=1:L_kih
         b_curr = 0;
         for k=1:M
-            b_curr = b_curr + exp((2*pi*1i*j*k)/M)/(abs(h_channel(k))^2+noise_var);
+            b_curr = b_curr + exp((2*pi/M)*1i*j*(k-1))/(h_channel(:,k)'*h_channel(:,k)+noise_var);
         end
         b_mmse(j) = -b_curr;
     end
+
+    %Coefficients through FFT check
+    % b_h = zeros(1,M);
+    % for k=1:M
+    %     b_h(k) = 1/(h_channel(:,k)'*h_channel(:,k)+noise_var);
+    % end
+    %b_mmse_fft = M*ifft(b_h);
 
     A_mmse = zeros(L_kih,L_kih);
     for j=1:L_kih
         for l=1:L_kih
             A_curr = 0;
             for k=1:M
-                A_curr = A_curr + exp((2*pi*1i*(l-j)*k)/M)/(abs(h_channel(k))^2+noise_var);
+                A_curr = A_curr + exp(-(2*pi/M)*1i*(l-j)*(k-1))/(h_channel(:,k)'*h_channel(:,k)+noise_var);
             end
-            A_mmse(j,l) = - A_curr;
+            A_mmse(j,l) = A_curr;
         end
     end
+   
+    %A_mmse_fft = fft(b_h);
 
     g_fb = linsolve(A_mmse,b_mmse.');
-    g_fb_padding = [zeros(n/2-L_kih/2,1); g_fb; zeros(n/2-L_kih/2,1)];
-    G_FB = (1/sqrt(n)).*fft(g_fb_padding);
-    G_FF = W.*(1+G_FB);
+    g_fb = [0+1i*0; g_fb];
+    G_FB = fft([0+1i*0 g_fb.' zeros(1,M-L_kih-1)],M);
+    %G_FB = fourier_dfe(g_fb,M);
+    G_FF = W.*(1+G_FB.');
 end
 
-function [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_tde,norm_1,n,nOFDM,g_fb_matrix,L_kih,M,sym_1,sym_2)
+function [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_tde,n,nOFDM,g_fb_matrix,L_kih,M)
     
     rx_fft_dfe = zeros(size(rx_fft_tde));
     rx_fft_dfe_demod = zeros(size(rx_fft_tde));
@@ -338,13 +347,13 @@ function [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_tde,norm_1,n,nOFDM,g_
     for jj=1:nOFDM-2
         for ii=1:n
             if jj < 7
-                g_fb = g_fb_matrix(:,1,1);
+                g_fb = g_fb_matrix(:,1);
             else
-                g_fb = g_fb_matrix(:,2,1);
+                g_fb = g_fb_matrix(:,2);
             end
     
-            symbol_window = zeros(1, L_kih+1);
-            for k_tde = 1:L_kih+1
+            symbol_window = zeros(1, L_kih);
+            for k_tde = 1:L_kih
                 if (ii-k_tde)<0
                     break
                 end
