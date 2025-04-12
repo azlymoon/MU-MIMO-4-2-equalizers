@@ -1,5 +1,5 @@
 clear all
-fe=12000;       %the number of collected statistics at each noise var value
+fe=5000;       %the number of collected statistics at each noise var value
 
 %Modulation parameters
 M = 4;      % Modulation order
@@ -51,7 +51,7 @@ dmrs_2 = ltePUSCHDRS(ue,chs);
 sym_1=4; sym_2=11;
 
 %Parameters for simulations
-EbNoArray=16:2:22;
+EbNoArray=8:2:16;
 Bit_Err_zf=zeros(1,length(EbNoArray));
 Bit_Err_mmse=zeros(1,length(EbNoArray));
 BER_theor=zeros(1,length(EbNoArray));
@@ -88,7 +88,7 @@ for i=1:length(EbNoArray)
         end
         %FFT step, without DM-RS
         norm_1 = 1/sqrt(n);
-        tx_qam_fft = fft(tx_qam,n,1);
+        tx_qam_fft = norm_1.*fft(tx_qam,n,1);
 
         %Add dm-rs signal on positions sym_1 and sym_2
         tx_qam_dmrs=zeros(n,nOFDM);
@@ -214,10 +214,10 @@ for i=1:length(EbNoArray)
             end
         end
 
-        rx_fft_tde=ifft(rx_fft_eq_mmse(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1);
-        rx_fft_zf=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1);
+        rx_fft_tde=ifft(rx_fft_eq_mmse(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
+        rx_fft_zf=ifft(rx_fft_eq_zf(:,[1:sym_1-1,sym_1+1:sym_2-1,sym_2+1:end]),n,1)./norm_1;
         [~,rx_fft_dfe] = FIR_filter(rx_fft_tde,n,nOFDM,g_fb_matrix,L_kih,M);
-        % [~,rx_fft_dfe] = FIR_filter(rx_fft_dfe,n,nOFDM,g_fb_matrix,L_kih,M);
+        %[~,rx_fft_dfe_1] = FIR_filter(rx_fft_dfe,n,nOFDM,g_fb_matrix,L_kih,M);
 
         evm_zf=zeros(1,nOFDM-2);
         evm_mmse=zeros(1,nOFDM-2);
@@ -334,8 +334,8 @@ function [g_fb, G_FF]=Coeffients_DFE_calculation(W, h_channel, noise_var, L_kih,
 
     g_fb = linsolve(A_mmse,b_mmse.');
     g_fb = [0+1i*0; g_fb];
-    G_FB = fft([0+1i*0 g_fb.' zeros(1,M-L_kih-1)],M);
-    %G_FB = fourier_dfe(g_fb,M);
+    G_FB = fft([g_fb.' zeros(1,M-L_kih)],M);
+    %G_FB = (1/M)*fourier_dfe(g_fb,M);
     G_FF = W.*(1+G_FB.');
 end
 
@@ -365,6 +365,33 @@ function [rx_fft_dfe_demod,rx_fft_dfe] = FIR_filter(rx_fft_tde,n,nOFDM,g_fb_matr
     
             %Вычитание обратной связи
             rx_fft_dfe(ii,jj) = rx_fft_tde(ii,jj) - feedback_signal;
+            qam_point = qamdemod(rx_fft_dfe(ii,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
+            rx_fft_dfe_demod(ii,jj)=qammod(qam_point,M,'gray',InputType='bit',UnitAveragePower=true);
+        end
+    end
+
+    for jj = 1:nOFDM-2
+        for ii=1:L_kih
+            if jj < 7
+                g_fb = g_fb_matrix(:,1);
+            else
+                g_fb = g_fb_matrix(:,2);
+            end
+    
+            symbol_window = zeros(1, L_kih);
+            for k_tde = 1:L_kih
+                idx = mod(n+ii-k_tde, n);
+                if idx == 0
+                    idx = n;
+                end
+                symbol_window(k_tde) = rx_fft_dfe_demod(idx,jj);
+            end
+            
+            % Свертка с g_fb (применение DFE)
+            feedback_signal = sum(g_fb.' .* symbol_window);
+    
+            %Вычитание обратной связи
+            rx_fft_dfe(ii,jj) = rx_fft_dfe(ii,jj) - feedback_signal;
             qam_point = qamdemod(rx_fft_dfe(ii,jj),M,'gray',OutputType='bit',UnitAveragePower=true);
             rx_fft_dfe_demod(ii,jj)=qammod(qam_point,M,'gray',InputType='bit',UnitAveragePower=true);
         end
